@@ -19,8 +19,14 @@ export interface Env {
   // Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
   // MY_BUCKET: R2Bucket;
 }
+
+// Declare a tuple type
+let round: [number, string];
+
+
 const sessionScheme = z.object({
   username: z.string(),
+  rounds: z.array(z.tuple([z.number(), z.string()])),
 });
 
 const signInParamScheme = z.object({
@@ -55,6 +61,55 @@ const signInPage = `<!DOCTYPE html>
 </body>
 </html>`;
 
+const flagLength = 6;
+
+
+// https://stackoverflow.com/a/7228322/3049282
+const randomIntFromInterval = function (min: number, max: number) { // min and max included 
+  return Math.floor(Math.random() * (max - min + 1) + min)
+}
+
+// https://sebhastian.com/fisher-yates-shuffle-javascript/
+const fyShuffle = function (arr: Array<typeof round>) {
+  let i = arr.length;
+  while (--i > 0) {
+    const randIndex = Math.floor(Math.random() * (i + 1));
+    [arr[randIndex], arr[i]] = [arr[i], arr[randIndex]];
+  }
+  return arr;
+}
+
+const generatePlaySequence = function (flag: string): Array<typeof round> {
+  const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+  const playground: Array<string> = [];
+  console.log(flag);
+  for (let i = 0; i < flag.length; i++) {
+    playground[i] = charset.replace(flag[i], '');
+  }
+
+  const roundCount = (26 + 10 - 1) * flag.length;
+  const rounds: Array<typeof round> = [];
+
+  let roundPosition = 0;
+  for (let i = 0; i < playground.length; i++) {
+    for (let j = 0; j < (26 + 10 - 1); j++) {
+
+      rounds[roundPosition] = round = [i, playground[i][j]];
+      roundPosition++;
+    }
+  }
+
+  const shuffleRounds = fyShuffle(rounds);
+
+  return shuffleRounds;
+}
+
+// dec2hex :: Integer -> String
+// i.e. 0-255 -> '00'-'ff'
+function dec2hex(dec: number) {
+  return dec.toString(16).padStart(2, "0")
+}
+
 export default {
   async fetch(
     request: Request,
@@ -70,6 +125,15 @@ export default {
     );
     const url = new URL(request.url);
     const baseUrl = `${url.protocol}//${url.host}`;
+    // https://stackoverflow.com/a/27747377/3049282
+    // This function is required to be in the fetch by CF Workers
+    // generateId :: Integer -> String
+    function generateId(len: number) {
+      const arr = new Uint8Array((len || 40) / 2)
+      crypto.getRandomValues(arr)
+      return Array.from(arr, dec2hex).join('')
+    }
+
     if (url.pathname === "/signIn") {
       if (request.method === "GET") {
         return new Response(signInPage, {
@@ -84,8 +148,19 @@ export default {
         const formData = await request.formData();
         const formObject = Object.fromEntries(formData.entries());
         const signInParam = signInParamScheme.parse(formObject);
+
+
+        const shuffledRounds = generatePlaySequence(generateId(flagLength));
+
+        // shuffledRounds.forEach(function (value, i)
+        // {
+        //  console.log( value[0] + " " + value[1]); 
+        // });
+
+
         await webCryptSession.save({
           username: signInParam.username,
+          rounds: shuffledRounds,
         });
         const session = webCryptSession.toHeaderValue();
         if (session == null) {
