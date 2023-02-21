@@ -2,3 +2,6 @@ name = "webcrypt-session"
 main = "src/index.ts"
 compatibility_date = "2022-06-14"
 tsconfig = "./tsconfig.json"
+
+[vars]
+SESSION_PASSWORD = "IF4B#t69!WlX$uS22blaxDvzJJ%$vEh%"

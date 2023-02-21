@@ -23,29 +23,54 @@ export interface Env {
 // Declare a tuple type
 let round: [number, string];
 
-
 const sessionScheme = z.object({
   username: z.string(),
+  flag: z.string(),
   rounds: z.array(z.tuple([z.number(), z.string()])),
+  sessionPassword: z.string(),
 });
 
 const signInParamScheme = z.object({
   username: z.string(),
 });
 
+const guessParamScheme = z.object({
+  guess: z.string(),
+});
+
 const welComePage = `<!DOCTYPE html>
 <body>
-  <h1>Hello WebCrypt-Session</h1>
+  <h1>Serverless Guessing Game</h1>
   <p>Please sign in first with <a href="/signIn">sign-in</a>.</p>
 </body>
 </html>`;
 
 const welComeUserPage = `<!DOCTYPE html>
 <body>
-  <h1>Hello WebCrypt-Session</h1>
-  <p>Welcome, <%= username %>!</p>
-  <p>You can sign out with clicking following button.</p>
-  <form action="/signOut" method="POST">
+  <h1>Serverless Guessing Game</h1>
+  <p>Welcome, <%= username %>.</p>
+  <form action="guess" method="POST">
+  <p>Guess the passcode!</p>
+  <label>Passcode: <input type="text" name="guess" required autofocus <%= disabled %> /></label>
+  <button type="submit" <%= disabled %> >Submit</button>
+  </form>
+  <p><%= hint %></p>
+  <p>You can sign out by clicking on the following button.</p>
+  <form action="signOut" method="POST">
+  <button type="submit">Sign Out</button>
+  </form>
+</body>
+</html>`;
+
+const wonPage = `<!DOCTYPE html>
+<body>
+  <h1>Serverless Guessing Game</h1>
+  <p>Welcome, <%= username %>.</p>
+  <p>Incredible! You found your this session flag: '<b><%= flag %></b>'. You almost won!</p>
+  <p>Crack the sessionPassword and share it with us as the final flag.</p>
+  <p>You will have to find the last 3 characters: <%= sessionPassword %></p>
+  <p>You can sign out by clicking on the following button.</p>
+  <form action="signOut" method="POST">
   <button type="submit">Sign Out</button>
   </form>
 </body>
@@ -53,9 +78,10 @@ const welComeUserPage = `<!DOCTYPE html>
 
 const signInPage = `<!DOCTYPE html>
 <body>
-  <h1>Sign-In to WebCrypt-Session</h1>
+  <h1>Serverless Guessing Game</h1>
+  <h2>Sign-in</h2>
   <form action="signIn" method="POST">
-    <label>Username: <input type="text" name="username" required /></label>
+    <label>Username: <input type="text" name="username" required autofocus /></label>
     <button type="submit">Sign in</button>
   </form>
 </body>
@@ -82,7 +108,7 @@ const fyShuffle = function (arr: Array<typeof round>) {
 const generatePlaySequence = function (flag: string): Array<typeof round> {
   const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
   const playground: Array<string> = [];
-  console.log(flag);
+  
   for (let i = 0; i < flag.length; i++) {
     playground[i] = charset.replace(flag[i], '');
   }
@@ -100,14 +126,14 @@ const generatePlaySequence = function (flag: string): Array<typeof round> {
   }
 
   const shuffleRounds = fyShuffle(rounds);
-
+  
   return shuffleRounds;
 }
 
-// dec2hex :: Integer -> String
-// i.e. 0-255 -> '00'-'ff'
-function dec2hex(dec: number) {
-  return dec.toString(16).padStart(2, "0")
+// dec2charset :: Integer -> String
+function dec2charset(dec: number) {
+  const charset = "0123456789abcdefghijklmnopqrstuvwxyz";
+  return charset[(dec % charset.length)];
 }
 
 export default {
@@ -116,11 +142,12 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
+    const sessionPassword = env.SESSION_PASSWORD;
     const webCryptSession = await createWebCryptSession(
       sessionScheme,
       request,
       {
-        password: "IF4B#t69!WlX$uS22blaxDvzJJ%$vEh%",
+        password: sessionPassword,
       }
     );
     const url = new URL(request.url);
@@ -129,9 +156,9 @@ export default {
     // This function is required to be in the fetch by CF Workers
     // generateId :: Integer -> String
     function generateId(len: number) {
-      const arr = new Uint8Array((len || 40) / 2)
+      const arr = new Uint8Array(len)
       crypto.getRandomValues(arr)
-      return Array.from(arr, dec2hex).join('')
+      return Array.from(arr, dec2charset).join('')
     }
 
     if (url.pathname === "/signIn") {
@@ -149,18 +176,21 @@ export default {
         const formObject = Object.fromEntries(formData.entries());
         const signInParam = signInParamScheme.parse(formObject);
 
+        const flag = generateId(flagLength);
+        const shuffledRounds = generatePlaySequence(flag);
 
-        const shuffledRounds = generatePlaySequence(generateId(flagLength));
-
+        console.log(flag);
+        console.log(sessionPassword);
         // shuffledRounds.forEach(function (value, i)
         // {
         //  console.log( value[0] + " " + value[1]); 
         // });
 
-
         await webCryptSession.save({
           username: signInParam.username,
+          flag: flag,
           rounds: shuffledRounds,
+          sessionPassword: sessionPassword
         });
         const session = webCryptSession.toHeaderValue();
         if (session == null) {
@@ -173,6 +203,77 @@ export default {
             "Set-Cookie": session,
           },
         });
+      } catch (_) {
+        return new Response(null, {
+          status: 400,
+        });
+      }
+    } else if (url.pathname === "/guess") {
+      if (request.method === "GET") {
+        return new Response(signInPage, {
+          headers: {
+            "content-type": "text/html;charset=UTF-8",
+          },
+        });
+      } else if (request.method !== "POST") {
+        return new Response(null, { status: 405 });
+      }
+      try {
+        const formData = await request.formData();
+        const formObject = Object.fromEntries(formData.entries());
+        const guessParam = guessParamScheme.parse(formObject);
+        
+        if(guessParam.guess == webCryptSession.flag)
+        {
+          const partialSessionPassword = webCryptSession.sessionPassword.slice(0, -3).concat("***");
+          return new Response(
+            wonPage.replace("<%= username %>", webCryptSession.username)
+            .replace("<%= flag %>", webCryptSession.flag)
+            .replace("<%= sessionPassword %>", partialSessionPassword),
+            {
+              headers: {
+                "Set-Cookie": webCryptSession.toHeaderValue() ?? "",
+                "content-type": "text/html;charset=UTF-8",
+              },
+            }
+          );
+        }
+        
+        let hint;
+        let disabled = "";
+        if(webCryptSession.rounds.length  == 0)
+        {
+          hint = "Game over";
+          disabled = "disabled";
+        }
+        else
+        {
+          hint = "Hint: There is no '" + webCryptSession.rounds[0][1] + "' at position '" + webCryptSession.rounds[0][0] + "'";
+        }
+    
+        if(webCryptSession.rounds.length  > 0)
+        {
+          webCryptSession.rounds.shift();
+        }
+        
+        await webCryptSession.save({
+          username: webCryptSession.username,
+          flag: webCryptSession.flag,
+          rounds: webCryptSession.rounds,
+          sessionPassword: webCryptSession.sessionPassword
+        });
+
+        return new Response(
+          welComeUserPage.replace("<%= username %>", webCryptSession.username)
+          .replace("<%= hint %>", hint)
+          .replaceAll("<%= disabled %>", disabled),
+          {
+            headers: {
+              "Set-Cookie": webCryptSession.toHeaderValue() ?? "",
+              "content-type": "text/html;charset=UTF-8",
+            },
+          }
+        );
       } catch (_) {
         return new Response(null, {
           status: 400,
@@ -195,8 +296,12 @@ export default {
         },
       });
     }
+    
+
     return new Response(
-      welComeUserPage.replace("<%= username %>", webCryptSession.username),
+      welComeUserPage.replace("<%= username %>", webCryptSession.username)
+      .replace("<%= hint %>", "I may try to help if it's too hard for you...")
+      .replaceAll("<%= disabled %>", ""),
       {
         headers: {
           "Set-Cookie": webCryptSession.toHeaderValue() ?? "",
