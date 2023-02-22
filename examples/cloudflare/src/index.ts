@@ -28,6 +28,8 @@ const sessionScheme = z.object({
   flag: z.string(),
   rounds: z.array(z.tuple([z.number(), z.string()])),
   sessionPassword: z.string(),
+  startTimestamp: z.number(),
+  lastGuessTimestamp : z.number()
 });
 
 const signInParamScheme = z.object({
@@ -50,11 +52,12 @@ const welComeUserPage = `<!DOCTYPE html>
   <h1>Serverless Guessing Game</h1>
   <p>Welcome, <%= username %>.</p>
   <form action="guess" method="POST">
-  <p>Guess the passcode!</p>
-  <label>Passcode: <input type="text" name="guess" required autofocus <%= disabled %> /></label>
+  <p>Guess the password!</p>
+  <label>Password: <input type="text" name="guess" required autofocus <%= disabled %> /></label>
   <button type="submit" <%= disabled %> >Submit</button>
   </form>
   <p><%= hint %></p>
+  <p>You have <%= remainingTime %> left.</p>
   <p>You can sign out by clicking on the following button.</p>
   <form action="signOut" method="POST">
   <button type="submit">Sign Out</button>
@@ -66,8 +69,8 @@ const wonPage = `<!DOCTYPE html>
 <body>
   <h1>Serverless Guessing Game</h1>
   <p>Welcome, <%= username %>.</p>
-  <p>Incredible! You found your this session flag: '<b><%= flag %></b>'. You almost won!</p>
-  <p>Crack the sessionPassword and share it with us as the final flag.</p>
+  <p>Incredible! You've found your session flag: '<b><%= flag %></b>'. You're almost done with this challenge!</p>
+  <p>Crack the SESSION_PASSWORD used to encrypt this session cookie, and share with us the cookie content as the final flag.</p>
   <p>You will have to find the last 3 characters: <%= sessionPassword %></p>
   <p>You can sign out by clicking on the following button.</p>
   <form action="signOut" method="POST">
@@ -87,8 +90,9 @@ const signInPage = `<!DOCTYPE html>
 </body>
 </html>`;
 
-const flagLength = 6;
-
+const flagLength = 5;
+const minTimeBetweenGuesses = 250;
+const maxGameDuration = 120*1000;
 
 // https://stackoverflow.com/a/7228322/3049282
 const randomIntFromInterval = function (min: number, max: number) { // min and max included 
@@ -136,6 +140,20 @@ function dec2charset(dec: number) {
   return charset[(dec % charset.length)];
 }
 
+function generateHintPhrase(position: number, character: string): string {
+  
+  switch(Math.random() * 2 | 0)
+  {
+    case 0:
+      return "Nope, that's not the password. Hint: There is no '" + character + "' at position '" + position + "'.";
+    case 1:
+      return "Nope, that's not the password. Hint: At postition '" + position + "', there is no '" + character + "'.";
+    default:
+      return "Nope, that's not the password. Hint: At postition '" + position + "', there is no '" + character + "'.";
+  }
+  
+}
+
 export default {
   async fetch(
     request: Request,
@@ -152,6 +170,15 @@ export default {
     );
     const url = new URL(request.url);
     const baseUrl = `${url.protocol}//${url.host}`;
+
+    const remainingTimeSeconds = Math.round((webCryptSession.startTimestamp + maxGameDuration - Date.now()) / 1000);
+
+    let remainingTime = "no time";
+    if(remainingTimeSeconds > 0)
+    {
+      remainingTime = remainingTimeSeconds + " seconds"
+    }
+
     // https://stackoverflow.com/a/27747377/3049282
     // This function is required to be in the fetch by CF Workers
     // generateId :: Integer -> String
@@ -180,17 +207,15 @@ export default {
         const shuffledRounds = generatePlaySequence(flag);
 
         console.log(flag);
-        console.log(sessionPassword);
-        // shuffledRounds.forEach(function (value, i)
-        // {
-        //  console.log( value[0] + " " + value[1]); 
-        // });
+        console.log(shuffledRounds.length)
 
         await webCryptSession.save({
           username: signInParam.username,
           flag: flag,
           rounds: shuffledRounds,
-          sessionPassword: sessionPassword
+          sessionPassword: sessionPassword,
+          startTimestamp: Date.now(),
+          lastGuessTimestamp: Date.now()
         });
         const session = webCryptSession.toHeaderValue();
         if (session == null) {
@@ -218,6 +243,12 @@ export default {
       } else if (request.method !== "POST") {
         return new Response(null, { status: 405 });
       }
+
+      if(Date.now() - webCryptSession.lastGuessTimestamp < minTimeBetweenGuesses)
+      {
+        return new Response("Too fast, cowboy!", { status: 429 });
+      }
+
       try {
         const formData = await request.formData();
         const formObject = Object.fromEntries(formData.entries());
@@ -243,12 +274,17 @@ export default {
         let disabled = "";
         if(webCryptSession.rounds.length  == 0)
         {
-          hint = "Game over";
+          hint = "Game over, too many tries.";
+          disabled = "disabled";
+        }
+        else if(Date.now() - webCryptSession.startTimestamp > maxGameDuration)
+        {
+          hint = "Game over, too slow to guess.";
           disabled = "disabled";
         }
         else
         {
-          hint = "Hint: There is no '" + webCryptSession.rounds[0][1] + "' at position '" + webCryptSession.rounds[0][0] + "'";
+          hint = generateHintPhrase(webCryptSession.rounds[0][0], webCryptSession.rounds[0][1]);
         }
     
         if(webCryptSession.rounds.length  > 0)
@@ -260,12 +296,15 @@ export default {
           username: webCryptSession.username,
           flag: webCryptSession.flag,
           rounds: webCryptSession.rounds,
-          sessionPassword: webCryptSession.sessionPassword
+          sessionPassword: webCryptSession.sessionPassword,
+          startTimestamp: webCryptSession.startTimestamp,
+          lastGuessTimestamp: Date.now()
         });
 
         return new Response(
           welComeUserPage.replace("<%= username %>", webCryptSession.username)
           .replace("<%= hint %>", hint)
+          .replace("<%= remainingTime %>", remainingTime.toString())
           .replaceAll("<%= disabled %>", disabled),
           {
             headers: {
@@ -297,10 +336,10 @@ export default {
       });
     }
     
-
     return new Response(
       welComeUserPage.replace("<%= username %>", webCryptSession.username)
       .replace("<%= hint %>", "I may try to help if it's too hard for you...")
+      .replace("<%= remainingTime %>", remainingTime.toString())
       .replaceAll("<%= disabled %>", ""),
       {
         headers: {
