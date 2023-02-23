@@ -147,9 +147,9 @@ function generateHintPhrase(position: number, character: string): string {
     case 0:
       return "Nope, that's not the password. Hint: There is no '" + character + "' at position '" + position + "'.";
     case 1:
-      return "Nope, that's not the password. Hint: At postition '" + position + "', there is no '" + character + "'.";
+      return "Nope, that's not the password. Hint: At position '" + position + "', there is no '" + character + "'.";
     default:
-      return "Nope, that's not the password. Hint: At postition '" + position + "', there is no '" + character + "'.";
+      return "Nope, that's not the password. Hint: At position '" + position + "', there is no '" + character + "'.";
   }
   
 }
@@ -246,7 +246,7 @@ export default {
 
       if(Date.now() - webCryptSession.lastGuessTimestamp < minTimeBetweenGuesses)
       {
-        return new Response("Too fast, cowboy!", { status: 429 });
+        return new Response("Too fast! Keep cool, you'll have just enough time to solve this.", { status: 429 });
       }
 
       try {
