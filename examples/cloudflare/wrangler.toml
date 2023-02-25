@@ -4,4 +4,5 @@ compatibility_date = "2022-06-14"
 tsconfig = "./tsconfig.json"
 
 [vars]
-SESSION_PASSWORD = "IF4B#t69!WlX$uS22blaxDvzJJ%$vEh%"
+SESSION_PASSWORD = "00000000000000000000000000000000"
+FLAG = "Flag{flag}"
