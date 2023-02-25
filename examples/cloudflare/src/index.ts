@@ -227,7 +227,7 @@ export default {
         const password = generateId(passwordLength);
         const shuffledRounds = generatePlaySequence(password);
 
-        //console.log(password);
+        console.log(password);
         //console.log(shuffledRounds.length)
 
         await webCryptSession.save({
@@ -269,26 +269,26 @@ export default {
         const formData = await request.formData();
         const formObject = Object.fromEntries(formData.entries());
         const passwordParam = passwordParamScheme.parse(formObject);
-        let validStep1Conditions = true;
+        let validConditions = true;
 
         let hint;
         let disabled = "";
         if (webCryptSession.rounds.length == 0) {
           hint = "Game over, too many tries.";
           disabled = "disabled";
-          validStep1Conditions = false;
+          validConditions = false;
         }
         else if (Date.now() - webCryptSession.startTimestamp > maxGameDuration) {
           hint = "Game over, too slow to guess.";
           disabled = "disabled";
-          validStep1Conditions = false;
+          validConditions = false;
         }
         else {
           hint = generateHintPhrase(webCryptSession.rounds[0][0], webCryptSession.rounds[0][1]);
         }
 
        // Step 1 - Success
-        if (passwordParam.password == webCryptSession.password && validStep1Conditions) {
+        if (passwordParam.password == webCryptSession.password && validConditions) {
           await webCryptSession.save({
             username: webCryptSession.username,
             password: webCryptSession.password,
@@ -417,8 +417,8 @@ export default {
         const hashArray = Array.from(new Uint8Array(hashBuffer)) // convert buffer to byte array
         const saltedSessionPassword = hashArray.map(b => b.toString(16).padStart(2, '0')).join('') // convert bytes to hex string
 
-        //console.log(webCryptSession.username + webCryptSession.password + webCryptSession.sessionPassword);
-        //console.log(saltedSessionPassword);
+        console.log(webCryptSession.username + webCryptSession.password + webCryptSession.sessionPassword);
+        console.log(saltedSessionPassword);
         
         // Step 2 success
         if(saltedSessionPasswordParam.saltedSessionPassword == saltedSessionPassword  && validStep2Conditions)
@@ -479,12 +479,12 @@ export default {
     } else if (url.pathname === "/flag") {
       if (request.method === "GET") {
 
-        let validPasswordConditions = true;
+        let validConditions = true;
         if (Date.now() - webCryptSession.startTimestamp > maxGameDuration) {
-          validPasswordConditions = false;
+          validConditions = false;
         }
 
-        if(webCryptSession.step1_sucess == true && webCryptSession.step2_sucess == true && validPasswordConditions) 
+        if(webCryptSession.step1_sucess == true && webCryptSession.step2_sucess == true && validConditions) 
         {
           return new Response(flag
             .replace("<%= username %>", webCryptSession.username)
